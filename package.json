@@ -1,6 +1,6 @@
 {
   "name": "puzzle-hunt-workbench",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Desktop puzzle-hunt workspace with multi-tab puzzle browsing, a persistent canvas, sleeping tools, and offline puzzle snapshots.",
   "main": "src/main.js",
@@ -30,12 +30,22 @@
     "win": {
       "target": ["nsis", "portable"]
     },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "Puzzle-Hunt-Workbench-${version}-Windows-Setup.${ext}"
+    },
+    "portable": {
+      "artifactName": "Puzzle-Hunt-Workbench-${version}-Windows-Portable.${ext}"
+    },
     "mac": {
       "target": ["dmg", "zip"],
+      "artifactName": "Puzzle-Hunt-Workbench-${version}-macOS-${arch}.${ext}",
       "category": "public.app-category.productivity"
     },
     "linux": {
       "target": ["AppImage", "tar.gz"],
+      "artifactName": "Puzzle-Hunt-Workbench-${version}-Linux-${arch}.${ext}",
       "category": "Utility"
     }
   }
