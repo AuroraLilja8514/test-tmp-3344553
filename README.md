@@ -11,6 +11,19 @@ Puzzle Hunt Workbench is a desktop solving environment for puzzle hunts. It keep
 - **Puzzle cache**: successful HTTP(S) puzzle loads are saved as local MHTML snapshots. Cache retention is configurable; when a hunt site is unreachable the app can automatically fall back to the most recent still-valid snapshot. You can also switch between Live and Cache manually.
 - **Hunt workspaces**: optional activity-level workspaces. Only one hunt workspace is active at a time; each workspace remembers its Puzzle tabs, Canvas URL, Tools, and favorites.
 
+## Portable builds and installation
+
+Windows releases contain two clearly named executables:
+
+- `...Windows-Setup.exe`: assisted installer; the installation directory can be changed during setup.
+- `...Windows-Portable.exe`: no installation required. By default its data is kept in a `Puzzle Hunt Workbench Data` folder beside the portable executable.
+
+On macOS, the `.zip` build can be unpacked and run without an installer; the `.dmg` is the normal distribution image. On Linux, both `.AppImage` and `.tar.gz` are no-installer distribution options.
+
+## Application data location
+
+Settings shows the currently active application-data folder and lets you choose a different parent directory. The app creates/uses a dedicated `Puzzle Hunt Workbench Data` folder there. Changing the location schedules a migration and requires a restart. Migration happens before Electron opens the persistent browser session, so workspaces, MHTML snapshots, cookies, logins, local storage and Chromium session data move together.
+
 ## Tool pop-out opacity
 
 The tool pop-out opacity is adjustable from 35% to 100%. Electron/OS support for window opacity can vary under some Linux window managers/Wayland configurations; Windows and macOS support the setting directly.
@@ -21,7 +34,7 @@ All Puzzle, Canvas, and Tool pages share the same persistent Electron session. T
 
 ## Cache behavior
 
-Puzzle snapshots are stored in the app's user-data directory as MHTML files. The cache is a resilience feature for temporary hunt-server outages—not a general archival crawler. Dynamic server-side behavior cannot run from an offline snapshot, but the rendered HTML and captured page resources remain available for reference.
+Puzzle snapshots are stored in the active application-data directory as MHTML files. The cache is a resilience feature for temporary hunt-server outages—not a general archival crawler. Dynamic server-side behavior cannot run from an offline snapshot, but the rendered HTML and captured page resources remain available for reference.
 
 ## Development
 
@@ -45,6 +58,6 @@ npm run dist
 
 ## Release process
 
-Pull requests to `main` run Windows, macOS, and Linux packaging without publishing. A successful push to `main` runs the same build matrix and automatically creates the GitHub Release matching `package.json` (currently `v0.1.0`) with the generated installers/artifacts.
+Pull requests to `main` run Windows, macOS, and Linux packaging without publishing. A successful push to `main` runs the same build matrix and automatically creates the GitHub Release matching `package.json` (currently `v0.1.1`) with the generated setup and portable artifacts.
 
 This project is not affiliated with any puzzle hunt or tool website.

@@ -1,18 +1,20 @@
-# Puzzle Hunt Workbench v0.1.0
+# Puzzle Hunt Workbench v0.1.1
 
-First complete release.
+Portable and storage-control update.
 
 Highlights:
 
-- persistent side-by-side Puzzle and Canvas areas;
-- multi-tab Puzzle browser with preserved tab state;
-- vertical Tools dock with multiple tabs and favorites;
-- semi-transparent Tool pop-out with configurable opacity and always-on-top option;
-- idle Tool sleeping to reduce Chromium resource use;
-- automatic MHTML Puzzle snapshots, configurable retention, manual Live/Cache switching, and automatic offline fallback;
-- persistent shared browser session for logins;
-- configurable Puzzle/Canvas split and Tool width;
-- activity-level hunt workspaces with one active workspace at a time;
-- Windows, macOS, and Linux packaging through GitHub Actions.
+- Windows now publishes clearly named **Setup** and **Portable** executables;
+- the Windows Setup build is an assisted installer and allows choosing the installation directory;
+- Windows Portable defaults its application data to a `Puzzle Hunt Workbench Data` folder beside the portable executable;
+- Settings now shows the active application-data directory and can move it to a user-selected location;
+- data relocation is performed safely on restart, before Electron creates browser sessions;
+- workspace state, puzzle MHTML cache, cookies, login/session data and Chromium storage move together;
+- macOS `.zip` and Linux `.AppImage` / `.tar.gz` remain no-installer distribution options;
+- data-location rules are covered by unit tests.
 
-The application is unsigned/not notarized in this release, so operating systems may show an unknown-publisher warning on first launch.
+The application is unsigned/not notarized, so operating systems may show an unknown-publisher warning on first launch.
+
+## v0.1.0
+
+First complete release: persistent Puzzle + Canvas areas, multi-tab Puzzle browsing, vertical sleeping Tools, semi-transparent Tool pop-out, MHTML offline fallback, persistent browser session, and activity-level workspaces.
