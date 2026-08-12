@@ -1,289 +1,46 @@
 'use strict';
-
-const path = require('node:path');
-const { app, BrowserWindow, WebContentsView, ipcMain, session, shell } = require('electron');
-const { StateStore } = require('./core/state-store');
-const { newPuzzleTab } = require('./core/default-state');
-const { normalizeUserUrl, isRemoteHttpUrl } = require('./core/url');
-const { calculateLayout } = require('./core/layout');
-
-const SESSION_PARTITION = 'persist:puzzle-hunt-workbench';
-
-let mainWindow = null;
-let sharedSession = null;
-let stateStore = null;
-let state = null;
-let canvasView = null;
-let puzzleViews = new Map();
-let currentLayout = null;
-let closing = false;
-
-function workspace() {
-  return state.workspaces[state.activeWorkspaceId];
+const path=require('node:path');const fs=require('node:fs/promises');const{pathToFileURL}=require('node:url');
+const{app,BrowserWindow,WebContentsView,ipcMain,session,shell}=require('electron');
+const{StateStore}=require('./core/state-store');const{newPuzzleTab,newToolTab}=require('./core/default-state');const{normalizeUserUrl,isRemoteHttpUrl}=require('./core/url');const{calculateLayout}=require('./core/layout');const{shouldSleepTool,toolOpacity}=require('./core/tool-lifecycle');const{CacheStore,isFreshCache}=require('./core/cache');const{createWorkspaceInState,renameWorkspace,deleteWorkspaceFromState}=require('./core/workspace');
+const SESSION_PARTITION='persist:puzzle-hunt-workbench';
+let mainWindow,toolWindow,sharedSession,stateStore,cacheStore,state,canvasView,currentLayout;let puzzleViews=new Map(),toolViews=new Map(),closing=false,sleepTimer;
+const ws=()=>state.workspaces[state.activeWorkspaceId];
+const puzzleTab=()=>ws().puzzleTabs.find(t=>t.id===ws().activePuzzleTabId)||ws().puzzleTabs[0];
+const toolTab=()=>ws().tools.tabs.find(t=>t.id===ws().tools.activeToolTabId)||null;
+function navState(contents){const h=contents?.navigationHistory;return{canGoBack:Boolean(h?.canGoBack()),canGoForward:Boolean(h?.canGoForward())}}
+function snapshot(){return{state,navigation:{puzzle:navState(puzzleViews.get(puzzleTab()?.id)?.webContents),canvas:navState(canvasView?.webContents),tool:navState(toolViews.get(toolTab()?.id)?.webContents||toolWindow?.webContents)},layout:currentLayout,platform:process.platform}}
+function broadcast(){if(mainWindow&&!mainWindow.isDestroyed())mainWindow.webContents.send('app:state',snapshot())}
+async function persist(){await stateStore.save(state);broadcast()}
+function prefs(){return{sandbox:true,contextIsolation:true,nodeIntegration:false,webSecurity:true,allowRunningInsecureContent:false,backgroundThrottling:true,session:sharedSession}}
+function detach(view){if(!view||!mainWindow||mainWindow.isDestroyed())return;try{mainWindow.contentView.removeChildView(view)}catch{}}
+function destroyView(view){if(!view)return;detach(view);try{if(!view.webContents.isDestroyed())view.webContents.close()}catch{}}
+function history(contents,action){if(!contents||contents.isDestroyed())return;const h=contents.navigationHistory;if(action==='back'&&h.canGoBack())h.goBack();else if(action==='forward'&&h.canGoForward())h.goForward();else if(action==='reload')contents.reload();else if(action==='hard-reload')contents.reloadIgnoringCache()}
+function wireRemote(contents,metadata,kind){contents.setWindowOpenHandler(({url})=>{if(kind==='puzzle'&&isRemoteHttpUrl(url)){queueMicrotask(()=>createPuzzle(url).catch(console.error));return{action:'deny'}}if(isRemoteHttpUrl(url)){return{action:'allow',overrideBrowserWindowOptions:{autoHideMenuBar:true,webPreferences:prefs()}}}return{action:'deny'}});const update=(_e,url)=>{if(kind==='puzzle'&&metadata.offline&&url.startsWith('file:'))return;metadata.url=url;if(kind==='puzzle'&&isRemoteHttpUrl(url)){metadata.onlineUrl=url;metadata.offline=false}persist().catch(console.error)};contents.on('did-navigate',update);contents.on('did-navigate-in-page',update);contents.on('page-title-updated',(_e,title)=>{metadata.title=title||metadata.title;persist().catch(console.error)});contents.on('did-start-loading',broadcast);contents.on('did-stop-loading',broadcast)}
+async function savePuzzleCache(tab,contents){if(!isRemoteHttpUrl(tab.onlineUrl)||contents.isDestroyed())return false;const file=cacheStore.pathFor(tab.onlineUrl);await fs.mkdir(path.dirname(file),{recursive:true});await contents.savePage(file,'MHTML');tab.cache={path:file,cachedAt:Date.now(),sourceUrl:tab.onlineUrl};tab.cacheAvailable=true;await persist();return true}
+async function openCache(tab){if(!tab.cache?.path||!(await cacheStore.exists(tab.cache.path)))return false;tab.offline=true;tab.cacheAvailable=true;await puzzleViews.get(tab.id)?.webContents.loadURL(pathToFileURL(tab.cache.path).href);await persist();return true}
+function createPuzzleView(tab){const view=new WebContentsView({webPreferences:prefs()});puzzleViews.set(tab.id,view);wireRemote(view.webContents,tab,'puzzle');view.webContents.on('did-finish-load',()=>{const current=view.webContents.getURL();if(isRemoteHttpUrl(current)&&!tab.offline)savePuzzleCache(tab,view.webContents).catch(()=>{})});view.webContents.on('did-fail-load',(_e,code,_desc,url,isMainFrame)=>{if(code===-3||isMainFrame===false||!isRemoteHttpUrl(url))return;if(state.settings.autoOfflineFallback&&isFreshCache(tab.cache,state.settings.cacheRetentionDays))openCache(tab).catch(()=>{})});view.webContents.loadURL(normalizeUserUrl(tab.offline&&tab.cache?.path?pathToFileURL(tab.cache.path).href:tab.url)).catch(()=>{});return view}
+function createCanvas(){canvasView=new WebContentsView({webPreferences:prefs()});wireRemote(canvasView.webContents,ws().canvas,'canvas');canvasView.webContents.loadURL(normalizeUserUrl(ws().canvas.url)).catch(()=>{})}
+function createToolView(tab){const view=new WebContentsView({webPreferences:prefs()});toolViews.set(tab.id,view);tab.sleeping=false;wireRemote(view.webContents,tab,'tool');view.webContents.loadURL(normalizeUserUrl(tab.url)).catch(()=>{});return view}
+function activeToolView(){const tab=toolTab();if(!tab)return null;let view=toolViews.get(tab.id);if(!view&&!ws().tools.poppedOut)view=createToolView(tab);return view}
+function applyLayout(){if(!mainWindow||mainWindow.isDestroyed())return;const[width,height]=mainWindow.getContentSize();const dockVisible=ws().tools.dockVisible&&!ws().tools.poppedOut&&Boolean(toolTab());currentLayout=calculateLayout({width,height,splitRatio:state.settings.splitRatio,toolVisible:dockVisible,toolWidth:state.settings.toolDockWidth});const p=puzzleViews.get(puzzleTab().id);if(p)p.setBounds(currentLayout.puzzle);if(canvasView)canvasView.setBounds(currentLayout.canvas);for(const view of toolViews.values())detach(view);if(dockVisible){const view=activeToolView();if(view){mainWindow.contentView.addChildView(view);view.setBounds(currentLayout.tool)}}broadcast()}
+function attachMain(){for(const view of puzzleViews.values())detach(view);const p=puzzleViews.get(puzzleTab().id);if(p)mainWindow.contentView.addChildView(p);if(canvasView){detach(canvasView);mainWindow.contentView.addChildView(canvasView)}applyLayout()}
+function teardownWorkspaceViews(){for(const v of puzzleViews.values())destroyView(v);puzzleViews.clear();for(const v of toolViews.values())destroyView(v);toolViews.clear();destroyView(canvasView);canvasView=null;if(toolWindow&&!toolWindow.isDestroyed())toolWindow.destroy();toolWindow=null}
+function buildWorkspaceViews(){for(const tab of ws().puzzleTabs)createPuzzleView(tab);createCanvas();attachMain()}
+async function createPuzzle(url='about:blank'){const tab=newPuzzleTab(normalizeUserUrl(url));ws().puzzleTabs.push(tab);ws().activePuzzleTabId=tab.id;createPuzzleView(tab);attachMain();await persist();return tab.id}
+async function switchPuzzle(id){if(!ws().puzzleTabs.some(t=>t.id===id))return false;ws().activePuzzleTabId=id;attachMain();await persist();return true}
+async function closePuzzle(id){const tabs=ws().puzzleTabs,i=tabs.findIndex(t=>t.id===id);if(i<0)return false;if(tabs.length===1){const t=tabs[0];Object.assign(t,{url:'about:blank',onlineUrl:'about:blank',title:'New Puzzle',offline:false});puzzleViews.get(t.id)?.webContents.loadURL('about:blank');return persist()}const active=ws().activePuzzleTabId===id;const[t]=tabs.splice(i,1);destroyView(puzzleViews.get(t.id));puzzleViews.delete(t.id);if(active)ws().activePuzzleTabId=tabs[Math.min(i,tabs.length-1)].id;attachMain();await persist();return true}
+async function createTool(url='about:blank',title='New Tool'){const tab=newToolTab(normalizeUserUrl(url),title);ws().tools.tabs.push(tab);ws().tools.activeToolTabId=tab.id;ws().tools.dockVisible=true;if(ws().tools.poppedOut)await openToolPopout(tab);else createToolView(tab);applyLayout();await persist();return tab.id}
+async function switchTool(id){const target=ws().tools.tabs.find(t=>t.id===id);if(!target)return false;const old=toolTab();if(old)old.lastActiveAt=Date.now();ws().tools.activeToolTabId=id;target.lastActiveAt=Date.now();if(ws().tools.poppedOut)await openToolPopout(target);else activeToolView();applyLayout();await persist();return true}
+async function closeTool(id){const tabs=ws().tools.tabs,i=tabs.findIndex(t=>t.id===id);if(i<0)return false;const active=ws().tools.activeToolTabId===id;const[t]=tabs.splice(i,1);destroyView(toolViews.get(t.id));toolViews.delete(t.id);if(active){ws().tools.activeToolTabId=tabs[Math.min(i,tabs.length-1)]?.id||null;if(ws().tools.poppedOut){if(toolTab())await openToolPopout(toolTab());else closeToolWindow()}}if(!tabs.length)ws().tools.dockVisible=false;applyLayout();await persist();return true}
+function closeToolWindow(){if(toolWindow&&!toolWindow.isDestroyed()){toolWindow.removeAllListeners('closed');toolWindow.destroy()}toolWindow=null;ws().tools.poppedOut=false}
+async function openToolPopout(tab=toolTab()){if(!tab)return false;for(const v of toolViews.values())detach(v);destroyView(toolViews.get(tab.id));toolViews.delete(tab.id);if(toolWindow&&!toolWindow.isDestroyed()){toolWindow.removeAllListeners('closed');toolWindow.destroy()}toolWindow=new BrowserWindow({width:420,height:760,minWidth:300,minHeight:360,title:tab.title||'Tool',alwaysOnTop:Boolean(state.settings.toolAlwaysOnTop),opacity:toolOpacity(state.settings.toolPopoutOpacity),autoHideMenuBar:true,webPreferences:prefs()});wireRemote(toolWindow.webContents,tab,'tool');toolWindow.on('closed',()=>{toolWindow=null;ws().tools.poppedOut=false;ws().tools.dockVisible=true;activeToolView();applyLayout();persist().catch(console.error)});ws().tools.poppedOut=true;ws().tools.dockVisible=false;tab.lastActiveAt=Date.now();await toolWindow.loadURL(normalizeUserUrl(tab.url)).catch(()=>{});applyLayout();await persist();return true}
+function sleepInactiveTools(){const active=toolTab();for(const tab of ws().tools.tabs){if(shouldSleepTool({lastActiveAt:tab.lastActiveAt,now:Date.now(),sleepMinutes:state.settings.toolSleepMinutes,isActive:tab.id===active?.id,poppedOut:ws().tools.poppedOut&&tab.id===active?.id})){const view=toolViews.get(tab.id);if(view){destroyView(view);toolViews.delete(tab.id)}tab.sleeping=true}}persist().catch(()=>{})}
+function registerIpc(){ipcMain.handle('app:get-state',()=>snapshot());ipcMain.handle('puzzle:new',(_e,u)=>createPuzzle(u));ipcMain.handle('puzzle:switch',(_e,id)=>switchPuzzle(id));ipcMain.handle('puzzle:close',(_e,id)=>closePuzzle(id));ipcMain.handle('puzzle:navigate',async(_e,u)=>{const tab=puzzleTab(),url=normalizeUserUrl(u);Object.assign(tab,{url,onlineUrl:url,offline:false});await puzzleViews.get(tab.id).webContents.loadURL(url).catch(()=>{});await persist()});ipcMain.handle('puzzle:history',(_e,a)=>history(puzzleViews.get(puzzleTab().id)?.webContents,a));ipcMain.handle('puzzle:toggle-cache',async()=>{const tab=puzzleTab();if(tab.offline){tab.offline=false;await puzzleViews.get(tab.id).webContents.loadURL(normalizeUserUrl(tab.onlineUrl));await persist();return'live'}return await openCache(tab)?'cache':'missing'});ipcMain.handle('puzzle:refresh-cache',()=>savePuzzleCache(puzzleTab(),puzzleViews.get(puzzleTab().id).webContents));
+  ipcMain.handle('canvas:navigate',async(_e,u)=>{const url=normalizeUserUrl(u);ws().canvas.url=url;await canvasView.webContents.loadURL(url).catch(()=>{});await persist()});ipcMain.handle('canvas:history',(_e,a)=>history(canvasView?.webContents,a));
+  ipcMain.handle('tool:toggle-dock',async()=>{if(!toolTab())await createTool();else{if(ws().tools.poppedOut)closeToolWindow();ws().tools.dockVisible=!ws().tools.dockVisible}applyLayout();await persist()});ipcMain.handle('tool:new',(_e,u,title)=>createTool(u,title));ipcMain.handle('tool:switch',(_e,id)=>switchTool(id));ipcMain.handle('tool:close',(_e,id)=>closeTool(id));ipcMain.handle('tool:navigate',async(_e,u)=>{const t=toolTab();if(!t)return;const url=normalizeUserUrl(u);t.url=url;t.lastActiveAt=Date.now();const contents=ws().tools.poppedOut?toolWindow?.webContents:activeToolView()?.webContents;await contents?.loadURL(url).catch(()=>{});await persist()});ipcMain.handle('tool:history',(_e,a)=>history(ws().tools.poppedOut?toolWindow?.webContents:activeToolView()?.webContents,a));ipcMain.handle('tool:popout',()=>openToolPopout());ipcMain.handle('tool:dock',async()=>{closeToolWindow();ws().tools.dockVisible=true;activeToolView();applyLayout();await persist()});ipcMain.handle('tool:favorite',async()=>{const t=toolTab();if(!t||!isRemoteHttpUrl(t.url))return false;if(!ws().tools.favorites.some(f=>f.url===t.url))ws().tools.favorites.push({id:`favorite-${Date.now()}`,name:t.title||t.url,url:t.url});await persist();return true});ipcMain.handle('tool:open-favorite',(_e,id)=>{const f=ws().tools.favorites.find(v=>v.id===id);return f?createTool(f.url,f.name):false});ipcMain.handle('tool:remove-favorite',async(_e,id)=>{ws().tools.favorites=ws().tools.favorites.filter(f=>f.id!==id);await persist()});
+  ipcMain.handle('layout:set-split',async(_e,r)=>{state.settings.splitRatio=Math.max(.1,Math.min(.9,Number(r)||.5));applyLayout();await persist()});ipcMain.handle('layout:set-tool-width',async(_e,w)=>{state.settings.toolDockWidth=Math.max(260,Math.min(560,Number(w)||360));applyLayout();await persist()});ipcMain.handle('settings:update',async(_e,patch)=>{const allowed=['toolPopoutOpacity','toolAlwaysOnTop','toolSleepMinutes','cacheRetentionDays','autoOfflineFallback'];for(const key of allowed)if(Object.hasOwn(patch,key))state.settings[key]=patch[key];if(toolWindow&&!toolWindow.isDestroyed()){toolWindow.setOpacity(toolOpacity(state.settings.toolPopoutOpacity));toolWindow.setAlwaysOnTop(Boolean(state.settings.toolAlwaysOnTop))}await cacheStore.clean(state.settings.cacheRetentionDays);await persist()});
+  ipcMain.handle('workspace:create',async(_e,name)=>{teardownWorkspaceViews();createWorkspaceInState(state,name);buildWorkspaceViews();await persist();return state.activeWorkspaceId});ipcMain.handle('workspace:switch',async(_e,id)=>{if(!state.workspaces[id]||id===state.activeWorkspaceId)return false;teardownWorkspaceViews();state.activeWorkspaceId=id;buildWorkspaceViews();await persist();return true});ipcMain.handle('workspace:rename',async(_e,id,name)=>{const ok=renameWorkspace(state,id,name);if(ok)await persist();return ok});ipcMain.handle('workspace:delete',async(_e,id)=>{const wasActive=id===state.activeWorkspaceId;if(wasActive)teardownWorkspaceViews();const ok=deleteWorkspaceFromState(state,id);if(ok&&wasActive)buildWorkspaceViews();if(ok)await persist();return ok});
 }
-
-function activePuzzleTab() {
-  return workspace().puzzleTabs.find((tab) => tab.id === workspace().activePuzzleTabId) || workspace().puzzleTabs[0];
-}
-
-function sendState() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  const puzzle = activePuzzleTab();
-  const activeView = puzzleViews.get(puzzle?.id);
-  const canvasHistory = canvasView?.webContents.navigationHistory;
-  const puzzleHistory = activeView?.webContents.navigationHistory;
-  mainWindow.webContents.send('app:state', {
-    state,
-    navigation: {
-      puzzle: {
-        canGoBack: Boolean(puzzleHistory?.canGoBack()),
-        canGoForward: Boolean(puzzleHistory?.canGoForward()),
-      },
-      canvas: {
-        canGoBack: Boolean(canvasHistory?.canGoBack()),
-        canGoForward: Boolean(canvasHistory?.canGoForward()),
-      },
-    },
-    layout: currentLayout,
-    platform: process.platform,
-  });
-}
-
-async function persistAndBroadcast() {
-  await stateStore.save(state);
-  sendState();
-}
-
-function safeRemotePreferences() {
-  return {
-    sandbox: true,
-    contextIsolation: true,
-    nodeIntegration: false,
-    webSecurity: true,
-    allowRunningInsecureContent: false,
-    backgroundThrottling: true,
-    session: sharedSession,
-  };
-}
-
-function attachNavigationMetadata(view, metadata, kind) {
-  const contents = view.webContents;
-  contents.setWindowOpenHandler(({ url }) => {
-    if (kind === 'puzzle' && isRemoteHttpUrl(url)) {
-      queueMicrotask(() => createPuzzleTab(url));
-      return { action: 'deny' };
-    }
-    if (isRemoteHttpUrl(url)) shell.openExternal(url);
-    return { action: 'deny' };
-  });
-
-  const updateUrl = (_event, url) => {
-    metadata.url = url;
-    if (kind === 'puzzle' && isRemoteHttpUrl(url)) metadata.onlineUrl = url;
-    persistAndBroadcast().catch(console.error);
-  };
-  contents.on('did-navigate', updateUrl);
-  contents.on('did-navigate-in-page', updateUrl);
-  contents.on('page-title-updated', (_event, title) => {
-    metadata.title = title || (kind === 'puzzle' ? 'Puzzle' : 'Canvas');
-    persistAndBroadcast().catch(console.error);
-  });
-  contents.on('did-start-loading', sendState);
-  contents.on('did-stop-loading', sendState);
-}
-
-function createPuzzleView(tab) {
-  const view = new WebContentsView({ webPreferences: safeRemotePreferences() });
-  attachNavigationMetadata(view, tab, 'puzzle');
-  puzzleViews.set(tab.id, view);
-  view.webContents.loadURL(normalizeUserUrl(tab.url)).catch(() => {});
-  return view;
-}
-
-function createCanvasView() {
-  canvasView = new WebContentsView({ webPreferences: safeRemotePreferences() });
-  attachNavigationMetadata(canvasView, workspace().canvas, 'canvas');
-  canvasView.webContents.loadURL(normalizeUserUrl(workspace().canvas.url)).catch(() => {});
-}
-
-function ensurePuzzleViews() {
-  for (const tab of workspace().puzzleTabs) {
-    if (!puzzleViews.has(tab.id)) createPuzzleView(tab);
-  }
-}
-
-function detachView(view) {
-  if (!view || !mainWindow || mainWindow.isDestroyed()) return;
-  try { mainWindow.contentView.removeChildView(view); } catch {}
-}
-
-function attachActiveViews() {
-  for (const view of puzzleViews.values()) detachView(view);
-  const active = puzzleViews.get(activePuzzleTab().id);
-  if (active) mainWindow.contentView.addChildView(active);
-  if (canvasView) {
-    detachView(canvasView);
-    mainWindow.contentView.addChildView(canvasView);
-  }
-  applyLayout();
-}
-
-function applyLayout() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  const [width, height] = mainWindow.getContentSize();
-  currentLayout = calculateLayout({
-    width,
-    height,
-    splitRatio: state.settings.splitRatio,
-    toolVisible: false,
-  });
-  const active = puzzleViews.get(activePuzzleTab().id);
-  if (active) active.setBounds(currentLayout.puzzle);
-  if (canvasView) canvasView.setBounds(currentLayout.canvas);
-  sendState();
-}
-
-async function createPuzzleTab(url = 'about:blank') {
-  const tab = newPuzzleTab(normalizeUserUrl(url));
-  workspace().puzzleTabs.push(tab);
-  workspace().activePuzzleTabId = tab.id;
-  createPuzzleView(tab);
-  attachActiveViews();
-  await persistAndBroadcast();
-  return tab.id;
-}
-
-async function switchPuzzleTab(tabId) {
-  if (!workspace().puzzleTabs.some((tab) => tab.id === tabId)) return false;
-  workspace().activePuzzleTabId = tabId;
-  attachActiveViews();
-  await persistAndBroadcast();
-  return true;
-}
-
-async function closePuzzleTab(tabId) {
-  const tabs = workspace().puzzleTabs;
-  const index = tabs.findIndex((tab) => tab.id === tabId);
-  if (index < 0) return false;
-  if (tabs.length === 1) {
-    const tab = tabs[0];
-    tab.url = 'about:blank';
-    tab.onlineUrl = 'about:blank';
-    tab.title = 'New Puzzle';
-    const view = puzzleViews.get(tab.id);
-    view?.webContents.loadURL('about:blank').catch(() => {});
-    await persistAndBroadcast();
-    return true;
-  }
-  const wasActive = workspace().activePuzzleTabId === tabId;
-  const [removed] = tabs.splice(index, 1);
-  const view = puzzleViews.get(removed.id);
-  detachView(view);
-  if (view && !view.webContents.isDestroyed()) view.webContents.close();
-  puzzleViews.delete(removed.id);
-  if (wasActive) workspace().activePuzzleTabId = tabs[Math.min(index, tabs.length - 1)].id;
-  attachActiveViews();
-  await persistAndBroadcast();
-  return true;
-}
-
-function navigateContents(contents, action) {
-  if (!contents || contents.isDestroyed()) return;
-  const history = contents.navigationHistory;
-  if (action === 'back' && history.canGoBack()) history.goBack();
-  else if (action === 'forward' && history.canGoForward()) history.goForward();
-  else if (action === 'reload') contents.reload();
-  else if (action === 'reload-hard') contents.reloadIgnoringCache();
-}
-
-function registerIpc() {
-  ipcMain.handle('app:get-state', () => ({ state, navigation: {}, layout: currentLayout, platform: process.platform }));
-  ipcMain.handle('puzzle:new', (_event, url) => createPuzzleTab(url));
-  ipcMain.handle('puzzle:switch', (_event, tabId) => switchPuzzleTab(tabId));
-  ipcMain.handle('puzzle:close', (_event, tabId) => closePuzzleTab(tabId));
-  ipcMain.handle('puzzle:navigate', async (_event, url) => {
-    const normalized = normalizeUserUrl(url);
-    const tab = activePuzzleTab();
-    tab.url = normalized;
-    tab.onlineUrl = normalized;
-    await persistAndBroadcast();
-    await puzzleViews.get(tab.id).webContents.loadURL(normalized).catch(() => {});
-  });
-  ipcMain.handle('puzzle:history', (_event, action) => navigateContents(puzzleViews.get(activePuzzleTab().id)?.webContents, action));
-  ipcMain.handle('canvas:navigate', async (_event, url) => {
-    const normalized = normalizeUserUrl(url);
-    workspace().canvas.url = normalized;
-    await persistAndBroadcast();
-    await canvasView.webContents.loadURL(normalized).catch(() => {});
-  });
-  ipcMain.handle('canvas:history', (_event, action) => navigateContents(canvasView?.webContents, action));
-  ipcMain.handle('layout:set-split', async (_event, ratio) => {
-    state.settings.splitRatio = Math.max(0.1, Math.min(0.9, Number(ratio) || 0.5));
-    applyLayout();
-    await persistAndBroadcast();
-  });
-}
-
-async function createMainWindow() {
-  mainWindow = new BrowserWindow({
-    width: state.window.width,
-    height: state.window.height,
-    minWidth: 900,
-    minHeight: 600,
-    show: false,
-    autoHideMenuBar: true,
-    title: 'Puzzle Hunt Workbench',
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      sandbox: true,
-      nodeIntegration: false,
-    },
-  });
-  await mainWindow.loadFile(path.join(__dirname, 'ui', 'index.html'));
-
-  ensurePuzzleViews();
-  createCanvasView();
-  attachActiveViews();
-
-  mainWindow.on('resize', applyLayout);
-  mainWindow.on('maximize', () => { state.window.maximized = true; stateStore.save(state).catch(console.error); });
-  mainWindow.on('unmaximize', () => { state.window.maximized = false; stateStore.save(state).catch(console.error); });
-  mainWindow.on('close', (event) => {
-    if (closing) return;
-    event.preventDefault();
-    closing = true;
-    const [width, height] = mainWindow.getSize();
-    state.window.width = width;
-    state.window.height = height;
-    stateStore.save(state).finally(() => mainWindow.destroy());
-  });
-  mainWindow.on('closed', () => {
-    for (const view of puzzleViews.values()) if (!view.webContents.isDestroyed()) view.webContents.close();
-    puzzleViews.clear();
-    if (canvasView && !canvasView.webContents.isDestroyed()) canvasView.webContents.close();
-    canvasView = null;
-    mainWindow = null;
-  });
-
-  mainWindow.once('ready-to-show', () => {
-    if (state.window.maximized) mainWindow.maximize();
-    mainWindow.show();
-    applyLayout();
-  });
-}
-
-app.whenReady().then(async () => {
-  stateStore = new StateStore(path.join(app.getPath('userData'), 'state.json'));
-  state = await stateStore.load();
-  sharedSession = session.fromPartition(SESSION_PARTITION, { cache: true });
-  registerIpc();
-  await createMainWindow();
-}).catch((error) => {
-  console.error(error);
-  app.quit();
-});
-
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
-});
+async function createMainWindow(){mainWindow=new BrowserWindow({width:state.window.width,height:state.window.height,minWidth:900,minHeight:600,show:false,autoHideMenuBar:true,title:'Puzzle Hunt Workbench',webPreferences:{preload:path.join(__dirname,'preload.js'),contextIsolation:true,sandbox:true,nodeIntegration:false}});await mainWindow.loadFile(path.join(__dirname,'ui','index.html'));buildWorkspaceViews();mainWindow.on('resize',applyLayout);mainWindow.on('maximize',()=>{state.window.maximized=true;stateStore.save(state)});mainWindow.on('unmaximize',()=>{state.window.maximized=false;stateStore.save(state)});mainWindow.on('close',e=>{if(closing)return;e.preventDefault();closing=true;const[width,height]=mainWindow.getSize();Object.assign(state.window,{width,height});stateStore.save(state).finally(()=>mainWindow.destroy())});mainWindow.on('closed',()=>{clearInterval(sleepTimer);teardownWorkspaceViews();mainWindow=null});mainWindow.once('ready-to-show',()=>{if(state.window.maximized)mainWindow.maximize();mainWindow.show();applyLayout()})}
+app.whenReady().then(async()=>{stateStore=new StateStore(path.join(app.getPath('userData'),'state.json'));state=await stateStore.load();cacheStore=new CacheStore(path.join(app.getPath('userData'),'puzzle-cache'));await cacheStore.clean(state.settings.cacheRetentionDays);sharedSession=session.fromPartition(SESSION_PARTITION,{cache:true});registerIpc();await createMainWindow();sleepTimer=setInterval(sleepInactiveTools,30000);if(process.env.PHW_SMOKE_TEST==='1')setTimeout(()=>{closing=true;app.quit()},2500)}).catch(e=>{console.error(e);app.quit()});
+app.on('window-all-closed',()=>{if(process.platform!=='darwin')app.quit()});

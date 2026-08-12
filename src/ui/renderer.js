@@ -1,90 +1,20 @@
 'use strict';
-
-const api = window.puzzleWorkbench;
-let snapshot = null;
-let dragging = false;
-
-const $ = (id) => document.getElementById(id);
-const puzzleChrome = $('puzzleChrome');
-const splitter = $('splitter');
-const canvasChrome = $('canvasChrome');
-
-function activeWorkspace() {
-  return snapshot.state.workspaces[snapshot.state.activeWorkspaceId];
-}
-
-function activePuzzle() {
-  const ws = activeWorkspace();
-  return ws.puzzleTabs.find((tab) => tab.id === ws.activePuzzleTabId) || ws.puzzleTabs[0];
-}
-
-function renderTabs() {
-  const ws = activeWorkspace();
-  const container = $('puzzleTabs');
-  container.replaceChildren();
-  for (const tab of ws.puzzleTabs) {
-    const item = document.createElement('div');
-    item.className = `tab${tab.id === ws.activePuzzleTabId ? ' active' : ''}`;
-    item.title = tab.url;
-    const title = document.createElement('span');
-    title.className = 'tab-title';
-    title.textContent = tab.title || 'Puzzle';
-    const close = document.createElement('span');
-    close.className = 'tab-close';
-    close.textContent = '×';
-    close.title = 'Close tab';
-    close.addEventListener('click', (event) => {
-      event.stopPropagation();
-      api.puzzleClose(tab.id);
-    });
-    item.addEventListener('click', () => api.puzzleSwitch(tab.id));
-    item.append(title, close);
-    container.append(item);
-  }
-}
-
-function render() {
-  if (!snapshot) return;
-  const ws = activeWorkspace();
-  const puzzle = activePuzzle();
-  $('puzzleUrl').value = puzzle.url === 'about:blank' ? '' : puzzle.url;
-  $('canvasUrl').value = ws.canvas.url === 'about:blank' ? '' : ws.canvas.url;
-  $('puzzleBack').disabled = !snapshot.navigation?.puzzle?.canGoBack;
-  $('puzzleForward').disabled = !snapshot.navigation?.puzzle?.canGoForward;
-  $('canvasBack').disabled = !snapshot.navigation?.canvas?.canGoBack;
-  $('canvasForward').disabled = !snapshot.navigation?.canvas?.canGoForward;
-  renderTabs();
-
-  const ratio = snapshot.state.settings.splitRatio;
-  puzzleChrome.style.width = `calc(${ratio * 100}% - 3px)`;
-  canvasChrome.style.width = `calc(${(1 - ratio) * 100}% - 3px)`;
-  canvasChrome.style.flex = 'none';
-  $('statusText').textContent = `${ws.puzzleTabs.length} puzzle tab${ws.puzzleTabs.length === 1 ? '' : 's'} · split ${Math.round(ratio * 100)}/${Math.round((1 - ratio) * 100)}`;
-}
-
-$('puzzleUrlForm').addEventListener('submit', (event) => { event.preventDefault(); api.puzzleNavigate($('puzzleUrl').value); });
-$('canvasUrlForm').addEventListener('submit', (event) => { event.preventDefault(); api.canvasNavigate($('canvasUrl').value); });
-$('newPuzzleTab').addEventListener('click', () => api.puzzleNew('about:blank'));
-$('puzzleBack').addEventListener('click', () => api.puzzleHistory('back'));
-$('puzzleForward').addEventListener('click', () => api.puzzleHistory('forward'));
-$('puzzleReload').addEventListener('click', () => api.puzzleHistory('reload'));
-$('canvasBack').addEventListener('click', () => api.canvasHistory('back'));
-$('canvasForward').addEventListener('click', () => api.canvasHistory('forward'));
-$('canvasReload').addEventListener('click', () => api.canvasHistory('reload'));
-
-splitter.addEventListener('mousedown', () => { dragging = true; splitter.classList.add('dragging'); });
-window.addEventListener('mousemove', (event) => {
-  if (!dragging) return;
-  const ratio = Math.max(0.1, Math.min(0.9, event.clientX / window.innerWidth));
-  puzzleChrome.style.width = `calc(${ratio * 100}% - 3px)`;
-  canvasChrome.style.width = `calc(${(1 - ratio) * 100}% - 3px)`;
-});
-window.addEventListener('mouseup', (event) => {
-  if (!dragging) return;
-  dragging = false;
-  splitter.classList.remove('dragging');
-  api.setSplitRatio(event.clientX / window.innerWidth);
-});
-
-api.onState((next) => { snapshot = next; render(); });
-api.getState().then((initial) => { snapshot = initial; render(); });
+const api=window.puzzleWorkbench;let snap=null,dragMode=null;
+const $=id=>document.getElementById(id);const px=v=>`${Math.max(0,Math.round(v))}px`;
+const activeWorkspace=()=>snap.state.workspaces[snap.state.activeWorkspaceId];
+const activePuzzle=()=>{const w=activeWorkspace();return w.puzzleTabs.find(t=>t.id===w.activePuzzleTabId)||w.puzzleTabs[0]};
+const activeTool=()=>{const w=activeWorkspace();return w.tools.tabs.find(t=>t.id===w.tools.activeToolTabId)||null};
+function tabElement(tab,active,kind){const el=document.createElement('div');el.className=`tab${active?' active':''}${tab.sleeping?' sleeping':''}`;el.title=tab.url;const title=document.createElement('span');title.className='tab-title';title.textContent=tab.title||(kind==='puzzle'?'Puzzle':'Tool');el.append(title);if(kind==='puzzle'&&tab.offline){const badge=document.createElement('span');badge.className='tab-offline';badge.textContent='CACHE';el.append(badge)}const close=document.createElement('span');close.className='tab-close';close.textContent='×';close.addEventListener('click',e=>{e.stopPropagation();kind==='puzzle'?api.puzzleClose(tab.id):api.toolClose(tab.id)});el.append(close);el.addEventListener('click',()=>kind==='puzzle'?api.puzzleSwitch(tab.id):api.toolSwitch(tab.id));return el}
+function renderTabs(){const w=activeWorkspace();$('puzzleTabs').replaceChildren(...w.puzzleTabs.map(t=>tabElement(t,t.id===w.activePuzzleTabId,'puzzle')));$('toolTabs').replaceChildren(...w.tools.tabs.map(t=>tabElement(t,t.id===w.tools.activeToolTabId,'tool')))}
+function renderWorkspaces(){const select=$('workspaceSelect');const current=select.value;select.replaceChildren(...Object.values(snap.state.workspaces).map(w=>{const o=document.createElement('option');o.value=w.id;o.textContent=w.name;return o}));select.value=snap.state.activeWorkspaceId||current}
+function renderFavorites(){const list=$('favoritesList'),favorites=activeWorkspace().tools.favorites;list.replaceChildren(...favorites.map(f=>{const b=document.createElement('button');b.textContent=f.name;b.title=`${f.url}\nRight-click to remove`;b.addEventListener('click',()=>api.toolOpenFavorite(f.id));b.addEventListener('contextmenu',e=>{e.preventDefault();api.toolRemoveFavorite(f.id)});return b}));$('favoritesBar').classList.toggle('hidden',favorites.length===0)}
+function applyChromeLayout(){if(!snap?.layout)return;const l=snap.layout,p=$('puzzleChrome'),c=$('canvasChrome'),s=$('mainSplitter'),ts=$('toolSplitter'),t=$('toolChrome');p.style.left='0px';p.style.width=px(l.puzzle.width);c.style.left=px(l.canvas.x);c.style.width=px(l.canvas.width);s.style.left=px(l.splitter.x);const visible=Boolean(l.tool);ts.classList.toggle('hidden',!visible);t.classList.toggle('hidden',!visible);if(visible){ts.style.left=px(l.toolSplitter.x);t.style.left=px(l.tool.x);t.style.width=px(l.tool.width)}}
+function render(){if(!snap)return;const w=activeWorkspace(),p=activePuzzle(),t=activeTool();renderWorkspaces();renderTabs();renderFavorites();applyChromeLayout();$('puzzleUrl').value=p.url==='about:blank'?'':p.url;$('canvasUrl').value=w.canvas.url==='about:blank'?'':w.canvas.url;$('toolUrl').value=t&&t.url!=='about:blank'?t.url:'';$('puzzleBack').disabled=!snap.navigation?.puzzle?.canGoBack;$('puzzleForward').disabled=!snap.navigation?.puzzle?.canGoForward;$('canvasBack').disabled=!snap.navigation?.canvas?.canGoBack;$('canvasForward').disabled=!snap.navigation?.canvas?.canGoForward;$('toolBack').disabled=!snap.navigation?.tool?.canGoBack;$('toolForward').disabled=!snap.navigation?.tool?.canGoForward;$('puzzleCache').disabled=!p.cacheAvailable;$('puzzleCache').textContent=p.offline?'Live':'Cache';$('toolsButton').textContent=w.tools.poppedOut?'Tools ↗':w.tools.dockVisible?'Hide Tools':'Tools';$('popoutTool').disabled=!t;$('favoriteTool').disabled=!t;$('statusText').textContent=`${w.name} · ${w.puzzleTabs.length} puzzle tab${w.puzzleTabs.length===1?'':'s'} · ${w.tools.tabs.length} tool${w.tools.tabs.length===1?'':'s'}`}
+function bindForm(form,input,fn){$(form).addEventListener('submit',e=>{e.preventDefault();fn($(input).value)})}
+bindForm('puzzleUrlForm','puzzleUrl',api.puzzleNavigate);bindForm('canvasUrlForm','canvasUrl',api.canvasNavigate);bindForm('toolUrlForm','toolUrl',api.toolNavigate);
+$('newPuzzleTab').onclick=()=>api.puzzleNew('about:blank');$('puzzleBack').onclick=()=>api.puzzleHistory('back');$('puzzleForward').onclick=()=>api.puzzleHistory('forward');$('puzzleReload').onclick=()=>api.puzzleHistory('reload');$('puzzleCache').onclick=()=>api.puzzleToggleCache();$('puzzleSnapshot').onclick=()=>api.puzzleRefreshCache();$('canvasBack').onclick=()=>api.canvasHistory('back');$('canvasForward').onclick=()=>api.canvasHistory('forward');$('canvasReload').onclick=()=>api.canvasHistory('reload');
+$('toolsButton').onclick=()=>api.toolToggleDock();$('newTool').onclick=()=>{const u=prompt('Tool URL');if(u)api.toolNew(u,'Tool')};$('toolBack').onclick=()=>api.toolHistory('back');$('toolForward').onclick=()=>api.toolHistory('forward');$('toolReload').onclick=()=>api.toolHistory('reload');$('popoutTool').onclick=()=>api.toolPopout();$('favoriteTool').onclick=()=>api.toolFavorite();
+$('workspaceSelect').onchange=e=>api.workspaceSwitch(e.target.value);$('workspaceAdd').onclick=()=>{const n=prompt('Puzzle hunt / event name','New Hunt');if(n)api.workspaceCreate(n)};$('workspaceRename').onclick=()=>{const w=activeWorkspace(),n=prompt('Rename workspace',w.name);if(n)api.workspaceRename(w.id,n)};$('workspaceDelete').onclick=()=>{const w=activeWorkspace();if(Object.keys(snap.state.workspaces).length>1&&confirm(`Delete workspace \"${w.name}\"?`))api.workspaceDelete(w.id)};
+function startDrag(mode,e){dragMode=mode;e.currentTarget.classList.add('dragging')}function endDrag(e){if(!dragMode)return;document.querySelectorAll('.splitter').forEach(x=>x.classList.remove('dragging'));if(dragMode==='main')api.setSplitRatio(e.clientX/window.innerWidth);else if(dragMode==='tool')api.setToolWidth(window.innerWidth-e.clientX);dragMode=null}$('mainSplitter').addEventListener('mousedown',e=>startDrag('main',e));$('toolSplitter').addEventListener('mousedown',e=>startDrag('tool',e));window.addEventListener('mouseup',endDrag);
+$('settingsButton').onclick=()=>{const s=snap.state.settings;$('settingOpacity').value=s.toolPopoutOpacity;$('opacityValue').value=`${Math.round(s.toolPopoutOpacity*100)}%`;$('settingSleep').value=s.toolSleepMinutes;$('settingCacheDays').value=s.cacheRetentionDays;$('settingOfflineFallback').checked=s.autoOfflineFallback;$('settingAlwaysOnTop').checked=s.toolAlwaysOnTop;$('settingsDialog').showModal()};$('settingOpacity').oninput=e=>$('opacityValue').value=`${Math.round(Number(e.target.value)*100)}%`;$('saveSettings').onclick=()=>api.updateSettings({toolPopoutOpacity:Number($('settingOpacity').value),toolSleepMinutes:Number($('settingSleep').value),cacheRetentionDays:Number($('settingCacheDays').value),autoOfflineFallback:$('settingOfflineFallback').checked,toolAlwaysOnTop:$('settingAlwaysOnTop').checked});
+api.onState(v=>{snap=v;render()});api.getState().then(v=>{snap=v;render()});
