@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'" />
+  <title>Puzzle Hunt Workbench</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header id="topbar">
+    <div class="brand">Puzzle Hunt Workbench</div>
+    <div class="spacer"></div>
+    <button id="toolsButton" disabled title="Tools arrive in M3">Tools</button>
+    <button id="settingsButton" disabled title="Settings arrive in M5">Settings</button>
+  </header>
+
+  <section id="panelChrome">
+    <div id="puzzleChrome" class="panel-chrome">
+      <div id="puzzleTabs" class="tabs"></div>
+      <div class="nav-row">
+        <button id="puzzleBack">←</button><button id="puzzleForward">→</button><button id="puzzleReload">↻</button>
+        <form id="puzzleUrlForm" class="url-form"><input id="puzzleUrl" autocomplete="off" spellcheck="false" /></form>
+        <button id="newPuzzleTab" title="New puzzle tab">+</button>
+      </div>
+    </div>
+    <div id="splitter" title="Drag to resize"></div>
+    <div id="canvasChrome" class="panel-chrome">
+      <div class="canvas-label">CANVAS</div>
+      <div class="nav-row">
+        <button id="canvasBack">←</button><button id="canvasForward">→</button><button id="canvasReload">↻</button>
+        <form id="canvasUrlForm" class="url-form"><input id="canvasUrl" autocomplete="off" spellcheck="false" /></form>
+      </div>
+    </div>
+  </section>
+
+  <div id="statusbar"><span id="statusText">Ready</span></div>
+  <script src="renderer.js"></script>
+</body>
+</html>
