@@ -40,12 +40,15 @@
     },
     "mac": {
       "target": ["dmg", "zip"],
-      "artifactName": "Puzzle-Hunt-Workbench-${version}-macOS-${arch}.${ext}",
+      "artifactName": "Puzzle-Hunt-Workbench-${version}-macOS-Portable-${arch}.${ext}",
       "category": "public.app-category.productivity"
+    },
+    "dmg": {
+      "artifactName": "Puzzle-Hunt-Workbench-${version}-macOS-DMG-${arch}.${ext}"
     },
     "linux": {
       "target": ["AppImage", "tar.gz"],
-      "artifactName": "Puzzle-Hunt-Workbench-${version}-Linux-${arch}.${ext}",
+      "artifactName": "Puzzle-Hunt-Workbench-${version}-Linux-Portable-${arch}.${ext}",
       "category": "Utility"
     }
   }
