@@ -59,6 +59,9 @@
     <label>Puzzle cache retention days <input id="settingCacheDays" type="number" min="1" max="90" /></label>
     <label class="check"><input id="settingOfflineFallback" type="checkbox" /> Automatically use cache when a puzzle site is unreachable</label>
     <label class="check"><input id="settingAlwaysOnTop" type="checkbox" /> Keep popped-out tool above the main window</label>
+    <label>Application data folder <input id="settingDataPath" type="text" readonly /></label>
+    <button id="changeDataPath" type="button">Change data folder…</button>
+    <small id="dataPathHint">Changing this location migrates workspaces, puzzle cache, cookies and browser session data after restart.</small>
     <div class="dialog-actions"><button value="cancel">Cancel</button><button id="saveSettings" value="default">Save</button></div>
   </form>
 </dialog>
