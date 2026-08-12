@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'" />
+  <title>Puzzle Hunt Workbench</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<header id="topbar">
+  <div class="brand">Puzzle Hunt Workbench</div>
+  <select id="workspaceSelect" title="Active hunt workspace"></select>
+  <button id="workspaceAdd" title="New hunt workspace">＋ Hunt</button>
+  <button id="workspaceRename" title="Rename active hunt">Rename</button>
+  <button id="workspaceDelete" title="Delete active hunt workspace">Delete</button>
+  <div class="spacer"></div>
+  <button id="toolsButton">Tools</button>
+  <button id="settingsButton">Settings</button>
+</header>
+<div id="puzzleChrome" class="panel-chrome">
+  <div id="puzzleTabs" class="tabs"></div>
+  <div class="nav-row">
+    <button id="puzzleBack">←</button><button id="puzzleForward">→</button><button id="puzzleReload">↻</button>
+    <form id="puzzleUrlForm" class="url-form"><input id="puzzleUrl" placeholder="Puzzle URL" autocomplete="off" spellcheck="false" /></form>
+    <button id="puzzleCache" title="Switch between live page and latest cache">Cache</button>
+    <button id="puzzleSnapshot" title="Refresh local snapshot">Save</button>
+    <button id="newPuzzleTab" title="New puzzle tab">＋</button>
+  </div>
+</div>
+<div id="mainSplitter" class="splitter" title="Resize Puzzle / Canvas"></div>
+<div id="canvasChrome" class="panel-chrome">
+  <div class="label-row">CANVAS</div>
+  <div class="nav-row">
+    <button id="canvasBack">←</button><button id="canvasForward">→</button><button id="canvasReload">↻</button>
+    <form id="canvasUrlForm" class="url-form"><input id="canvasUrl" placeholder="Canvas URL (Google Sheets, Docs, Excalidraw…)" autocomplete="off" spellcheck="false" /></form>
+  </div>
+</div>
+<div id="toolSplitter" class="splitter hidden" title="Resize Tools"></div>
+<div id="toolChrome" class="panel-chrome hidden">
+  <div class="tool-top-row">
+    <div id="toolTabs" class="tabs tool-tabs"></div>
+    <button id="newTool" title="New tool">＋</button>
+    <button id="popoutTool" title="Pop out current tool">↗</button>
+    <button id="favoriteTool" title="Save current tool as favorite">★</button>
+  </div>
+  <div class="nav-row">
+    <button id="toolBack">←</button><button id="toolForward">→</button><button id="toolReload">↻</button>
+    <form id="toolUrlForm" class="url-form"><input id="toolUrl" placeholder="Tool URL" autocomplete="off" spellcheck="false" /></form>
+  </div>
+</div>
+<div id="favoritesBar" class="favorites hidden"><span>Favorites:</span><div id="favoritesList"></div></div>
+<div id="statusbar"><span id="statusText">Ready</span></div>
+<dialog id="settingsDialog">
+  <form method="dialog" id="settingsForm">
+    <h2>Settings</h2>
+    <label>Tool pop-out opacity <output id="opacityValue"></output><input id="settingOpacity" type="range" min="0.35" max="1" step="0.01" /></label>
+    <label>Tool sleep after idle minutes <input id="settingSleep" type="number" min="1" max="120" /></label>
+    <label>Puzzle cache retention days <input id="settingCacheDays" type="number" min="1" max="90" /></label>
+    <label class="check"><input id="settingOfflineFallback" type="checkbox" /> Automatically use cache when a puzzle site is unreachable</label>
+    <label class="check"><input id="settingAlwaysOnTop" type="checkbox" /> Keep popped-out tool above the main window</label>
+    <div class="dialog-actions"><button value="cancel">Cancel</button><button id="saveSettings" value="default">Save</button></div>
+  </form>
+</dialog>
+<script src="renderer.js"></script>
+</body>
+</html>
